@@ -1,4 +1,4 @@
-# študent naj bo!
+# Študent naj bo!
 
 A small static web app for playing Radio Študent `Glasbene opreme` tracklists through Spotify.
 
