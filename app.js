@@ -14,6 +14,7 @@ setSpotifyConnected(false);
 $('loadLatest').addEventListener('click', loadLatestLists);
 $('loadUrl').addEventListener('click', () => loadTracklist($('detailUrl').value.trim()));
 $('copyTracks').addEventListener('click', copyTracks);
+$('createPlaylist').addEventListener('click', () => createPlaylistFromCurrentDay($('createPlaylist')));
 $('playDay').addEventListener('click', () => {
   const source = getQueueSource();
   if (state.currentPlayback?.is_playing && source?.url === state.currentUrl) return spotifyPlayPause(state.currentPlayback);
@@ -201,7 +202,7 @@ function renderTracks() {
     });
     $('tracks').append(li);
   }
-  $('copyTracks').disabled = $('openSpotify').disabled = $('playDay').disabled = false;
+  $('copyTracks').disabled = $('openSpotify').disabled = $('playDay').disabled = $('createPlaylist').disabled = false;
 }
 
 function toggleSpotifyConnection() {
@@ -521,6 +522,78 @@ function friendlySpotifyError(err) {
   return err.message;
 }
 
+async function matchCurrentDay({ indicatorEl = null } = {}) {
+  if (!state.tracks.length) throw new Error('Load a Radio Študent day first.');
+  setPlaylistStatus(`Matching 0/${state.tracks.length}`);
+  const uris = [];
+  for (let i = 0; i < state.tracks.length; i++) {
+    const t = state.tracks[i];
+    if (indicatorEl) indicatorEl.title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
+    setPlaylistStatus(`Matching ${i + 1}/${state.tracks.length}`);
+    setPlaylistProgress(i, state.tracks.length);
+    const match = await findSpotifyTrack(t);
+    if (match) {
+      t.spotifyUri = match.uri;
+      t.spotifyName = match.name;
+      t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
+      uris.push(match.uri);
+    } else {
+      t.spotifyMissing = true;
+      console.warn('No confident Spotify match:', t);
+    }
+    await new Promise(r => setTimeout(r, 80));
+  }
+  setPlaylistProgress(state.tracks.length, state.tracks.length);
+  renderTracks();
+  if (!uris.length) throw new Error('Spotify did not match any tracks.');
+  setPlaylistStatus(`Matched ${uris.length}/${state.tracks.length}`);
+  return uris;
+}
+
+async function createSpotifyPlaylist(uris) {
+  const me = await spotifyApi('/me');
+  const playlist = await spotifyApi('/users/' + me.id + '/playlists', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: state.currentTitle || 'Radio Študent tracklist',
+      public: false,
+      description: 'Generated from ' + state.currentUrl
+    })
+  });
+  for (let i = 0; i < uris.length; i += 100) {
+    await spotifyApi('/playlists/' + playlist.id + '/tracks', {
+      method: 'POST',
+      body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+    });
+  }
+  return playlist;
+}
+
+async function createPlaylistFromCurrentDay(button) {
+  const originalText = button?.textContent;
+  try {
+    if (!state.spotifyToken) return connectSpotify();
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Saving…';
+    }
+    const uris = await matchCurrentDay({ indicatorEl: button });
+    setPlaylistStatus('Creating playlist…');
+    const playlist = await createSpotifyPlaylist(uris);
+    window.open(playlist.external_urls.spotify, '_blank', 'noreferrer');
+    setPlaylistStatus(`Saved ${uris.length}/${state.tracks.length}`);
+  } catch (err) {
+    setPlaylistStatus(err.message, true);
+  } finally {
+    clearPlaylistProgress();
+    if (button) {
+      button.disabled = !state.tracks.length;
+      button.textContent = originalText || 'Save playlist';
+      button.title = 'Save playlist';
+    }
+  }
+}
+
 function rememberQueueSource() {
   if (!state.currentUrl) return;
   localStorage.setItem(QUEUE_SOURCE_KEY, JSON.stringify({ url: state.currentUrl, title: state.currentTitle, at: Date.now() }));
@@ -628,45 +701,14 @@ async function playCurrentDay(indicatorEl = null) {
     } else {
       $('playDay').textContent = '…';
     }
-    setPlaylistStatus(`Matching 0/${state.tracks.length}`);
-    const uris = [];
-    for (let i = 0; i < state.tracks.length; i++) {
-      const t = state.tracks[i];
-        if (indicatorEl) indicatorEl.title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
-      else $('playDay').title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
-      setPlaylistStatus(`Matching ${i + 1}/${state.tracks.length}`);
-      setPlaylistProgress(i, state.tracks.length);
-      const match = await findSpotifyTrack(t);
-      if (match) {
-        t.spotifyUri = match.uri;
-        t.spotifyName = match.name;
-        t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
-        uris.push(match.uri);
-      } else {
-        t.spotifyMissing = true;
-        console.warn('No confident Spotify match:', t);
-      }
-      await new Promise(r => setTimeout(r, 80));
-    }
-    if (!uris.length) throw new Error('Spotify did not match any tracks.');
-
-    renderTracks();
-    setPlaylistProgress(state.tracks.length, state.tracks.length);
-    setPlaylistStatus(`Matched ${uris.length}/${state.tracks.length}`);
+    const uris = await matchCurrentDay({ indicatorEl });
     try {
       rememberQueueSource();
       await spotifyApi('/me/player/play', { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
       startPlaybackPolling();
       setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
     } catch (playErr) {
-      const me = await spotifyApi('/me');
-      const playlist = await spotifyApi('/users/' + me.id + '/playlists', {
-        method: 'POST',
-        body: JSON.stringify({ name: state.currentTitle || 'Radio Študent tracklist', public: false, description: 'Generated from ' + state.currentUrl })
-      });
-      for (let i = 0; i < uris.length; i += 100) {
-        await spotifyApi('/playlists/' + playlist.id + '/tracks', { method: 'POST', body: JSON.stringify({ uris: uris.slice(i, i + 100) }) });
-      }
+      const playlist = await createSpotifyPlaylist(uris);
       rememberQueueSource();
       window.open(playlist.external_urls.spotify, '_blank', 'noreferrer');
       setPlaylistStatus(`Playlist opened (${uris.length}/${state.tracks.length})`);
