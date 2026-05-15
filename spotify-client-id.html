@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Use your own Spotify Client ID · Študent naj bo!</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app docPage">
+    <header class="hero">
+      <div class="topBar">
+        <p class="eyebrow"><a href="./">← Študent naj bo!</a></p>
+      </div>
+      <h1>Use your own Spotify Client ID</h1>
+      <p>If the shared Spotify app reaches its user limit, you can create your own free Spotify app and use its Client ID.</p>
+    </header>
+
+    <section class="card docCard">
+      <h2>1. Create a Spotify app</h2>
+      <ol>
+        <li>Open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard ↗</a>.</li>
+        <li>Log in with your Spotify account.</li>
+        <li>Click <strong>Create app</strong>.</li>
+        <li>Use any app name, for example <strong>Študent naj bo</strong>.</li>
+        <li>For the redirect URI, add the URL where you use the app.</li>
+      </ol>
+
+      <p>For the hosted app, add:</p>
+      <pre><code>https://rokroskar.github.io/student-naj-bo/</code></pre>
+
+      <p>For local development, also add:</p>
+      <pre><code>http://localhost:8000/</code></pre>
+    </section>
+
+    <section class="card docCard">
+      <h2>2. Copy the Client ID</h2>
+      <ol>
+        <li>Open your Spotify app in the dashboard.</li>
+        <li>Go to <strong>Settings</strong>.</li>
+        <li>Copy the <strong>Client ID</strong>.</li>
+      </ol>
+
+      <p>You do <strong>not</strong> need the Client Secret. Do not paste a Client Secret into this app.</p>
+    </section>
+
+    <section class="card docCard">
+      <h2>3. Save it in this browser</h2>
+      <p>Paste your Client ID below. It is stored only in this browser's <code>localStorage</code>.</p>
+      <div class="urlLoad">
+        <input id="customClientId" placeholder="Spotify Client ID" autocomplete="off" />
+        <button id="saveClientId">Save Client ID</button>
+      </div>
+      <p id="saveStatus" class="hint"></p>
+      <p><a href="./">Return to the app →</a></p>
+    </section>
+  </main>
+
+  <script>
+    const key = 'spotifyClientIdOverride:v1';
+    const input = document.getElementById('customClientId');
+    const status = document.getElementById('saveStatus');
+    input.value = localStorage.getItem(key) || '';
+    document.getElementById('saveClientId').addEventListener('click', () => {
+      const value = input.value.trim();
+      if (!value) {
+        localStorage.removeItem(key);
+        status.textContent = 'Custom Client ID removed. The shared app will be used.';
+      } else {
+        localStorage.setItem(key, value);
+        status.textContent = 'Saved. Return to the app and connect Spotify again.';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -44,10 +44,10 @@ http://localhost:8000/
 
 This app uses Spotify Authorization Code with PKCE, so it can run as a static frontend-only app. No client secret is used.
 
-The Spotify Client ID is configured in `app.js`:
+The app includes a shared Spotify Client ID in `app.js`. Users who hit Spotify's development-mode user limit can use their own Client ID via:
 
-```js
-const BUILT_IN_SPOTIFY_CLIENT_ID = '...';
+```text
+spotify-client-id.html
 ```
 
 The Spotify app must include every deployment URL as a Redirect URI, for example:

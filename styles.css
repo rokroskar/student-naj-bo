@@ -179,6 +179,13 @@ h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05e
 .trackTitle { font-weight: 800; }
 .trackLinks { white-space: nowrap; color: var(--muted); font-size: .86rem; }
 .empty { color: var(--muted); }
+.docPage { max-width: 820px; }
+.docCard { margin-bottom: 1rem; }
+.docCard h2 { margin-bottom: .75rem; }
+.docCard li { margin: .45rem 0; }
+pre { overflow: auto; padding: .8rem; border: 1px solid var(--line); background: var(--paper); }
+code { font: inherit; }
+
 @media (max-width: 820px) {
   .app { padding: .75rem; }
   .topBar { margin-bottom: 1rem; }

@@ -5,6 +5,7 @@ const LAST_TRACKLIST_KEY = 'rsLastTracklist:v1';
 // Optional for GitHub Pages: paste your Spotify app Client ID here.
 // This is not a secret when using PKCE; it is safe to ship in static frontend code.
 const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
+const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
 const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null };
@@ -236,7 +237,7 @@ async function connectSpotify() {
 }
 
 function getSpotifyClientId() {
-  return BUILT_IN_SPOTIFY_CLIENT_ID;
+  return localStorage.getItem(SPOTIFY_CLIENT_ID_OVERRIDE_KEY) || BUILT_IN_SPOTIFY_CLIENT_ID;
 }
 
 async function handleSpotifyRedirect() {
