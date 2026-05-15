@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#f4f1e8"/>
+  <circle cx="32" cy="32" r="22" fill="none" stroke="#111111" stroke-width="4"/>
+  <path d="M27 21v22l17-11z" fill="#1ed760"/>
+  <text x="8" y="18" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" font-weight="800" fill="#111111">Š</text>
+</svg>
