@@ -149,7 +149,17 @@ h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05e
 }
 #sourceLink.externalIcon:hover { color: var(--ink); border-color: var(--line); }
 .hidden { display: none !important; }
-.playlistStatus { min-height: 1.2rem; margin: .45rem 0 .2rem; color: var(--muted); font-size: .84rem; }
+.playlistStatus { position: relative; min-height: 1.2rem; margin: .45rem 0 .2rem; color: var(--muted); font-size: .84rem; }
+.playlistStatus.withProgress { padding-bottom: .45rem; }
+.playlistStatus.withProgress::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--progress, 0%);
+  height: 2px;
+  background: var(--ink);
+}
 .playlistStatus.error { color: var(--danger); }
 .tracks { padding-left: 0; margin: .3rem 0 0; list-style: none; }
 .tracks li { padding: .62rem 0; border-bottom: 1px solid var(--line); }

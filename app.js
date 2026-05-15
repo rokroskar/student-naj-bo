@@ -34,6 +34,17 @@ function setPlaylistStatus(message, isError = false) {
   $('playlistStatus').className = `playlistStatus ${isError ? 'error' : ''}`;
 }
 
+function setPlaylistProgress(current, total) {
+  const pct = total ? Math.max(0, Math.min(100, current / total * 100)) : 0;
+  $('playlistStatus').style.setProperty('--progress', `${pct}%`);
+  $('playlistStatus').classList.add('withProgress');
+}
+
+function clearPlaylistProgress() {
+  $('playlistStatus').style.removeProperty('--progress');
+  $('playlistStatus').classList.remove('withProgress');
+}
+
 function setSpotifyConnected(connected) {
   const button = $('spotifyLogin');
   const dot = $('spotifyState');
@@ -158,53 +169,12 @@ function parseDetail(html, knownTitle) {
   if (!html.includes('<html')) return parseMarkdownDetail(html, knownTitle);
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const title = clean(doc.querySelector('h1, meta[property="og:title"]')?.textContent || doc.querySelector('meta[property="og:title"]')?.content || knownTitle);
-  const structuredTracks = [...doc.querySelectorAll('.field--name-field-naslov-skladbe')]
-    .map(el => cleanTrackLine(el.textContent));
-  if (structuredTracks.length) {
-    return { title, tracks: structuredTracks.map(toTrack).filter(Boolean) };
-  }
-
-  const body = doc.querySelector('.node--type-glasbena-oprema .field--name-body, .node--type-prispevek .field--name-body, main .field--name-body') || doc;
-  const items = [...body.querySelectorAll('li')];
-  let lines;
-  if (items.length) {
-    lines = items.map(li => {
-      const clone = li.cloneNode(true);
-      clone.querySelectorAll('a, script, style').forEach(n => n.remove());
-      return cleanTrackLine(clone.textContent);
-    });
-  } else {
-    const clone = body.cloneNode(true);
-    clone.querySelectorAll('a, script, style').forEach(n => n.remove());
-    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-    lines = clone.textContent.split('\n').map(cleanTrackLine);
-  }
-  return { title, tracks: lines.map(toTrack).filter(Boolean) };
+  return { title, tracks: parseTracksFromHtml(html) };
 }
 
 function parseMarkdownDetail(md, knownTitle) {
   const title = clean((md.match(/^Title:\s*(.+)$/m) || [,''])[1] || knownTitle);
-  const lines = md.split('\n').map(l => l.replace(/^\s*\d+[.)]\s*/, '')).map(cleanTrackLine);
-  return { title, tracks: lines.map(toTrack).filter(Boolean) };
-}
-
-function cleanTrackLine(s) {
-  return clean(s)
-    .replace(/^\s*\d{1,3}\s*[-.)]\s*/, '')
-    .replace(/\(\s*\d{1,2}:\d{2}\s*\)/g, '')
-    .replace(/\s+-\s*\d{1,2}:\d{2}\s*$/g, '')
-    .replace(/\s+\d{1,2}:\d{2}\s*$/g, '')
-    .replace(/\[Edit\]|\.mp3/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function toTrack(line) {
-  if (!line || !line.includes(' - ') || line.length > 180) return null;
-  const [artist, ...rest] = line.split(' - ');
-  const title = rest.join(' - ');
-  if (!artist || !title) return null;
-  return { artist: artist.trim(), title: title.trim(), query: `${artist.trim()} ${title.trim()}` };
+  return { title, tracks: parseTracksFromMarkdown(md) };
 }
 
 function renderTracks() {
@@ -658,11 +628,14 @@ async function playCurrentDay(indicatorEl = null) {
     } else {
       $('playDay').textContent = '…';
     }
+    setPlaylistStatus(`Matching 0/${state.tracks.length}`);
     const uris = [];
     for (let i = 0; i < state.tracks.length; i++) {
       const t = state.tracks[i];
         if (indicatorEl) indicatorEl.title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
       else $('playDay').title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
+      setPlaylistStatus(`Matching ${i + 1}/${state.tracks.length}`);
+      setPlaylistProgress(i, state.tracks.length);
       const match = await findSpotifyTrack(t);
       if (match) {
         t.spotifyUri = match.uri;
@@ -678,6 +651,7 @@ async function playCurrentDay(indicatorEl = null) {
     if (!uris.length) throw new Error('Spotify did not match any tracks.');
 
     renderTracks();
+    setPlaylistProgress(state.tracks.length, state.tracks.length);
     setPlaylistStatus(`Matched ${uris.length}/${state.tracks.length}`);
     try {
       rememberQueueSource();
@@ -700,6 +674,7 @@ async function playCurrentDay(indicatorEl = null) {
   } catch (err) {
     setPlaylistStatus(err.message, true);
   } finally {
+    clearPlaylistProgress();
     $('playDay').disabled = !state.tracks.length;
     $('playDay').textContent = '▶';
     $('playDay').title = 'Play day';
@@ -728,5 +703,4 @@ async function copyTracks() {
   await navigator.clipboard.writeText(state.tracks.map(t => `${t.artist} - ${t.title}`).join('\n'));
   setStatus('Copied tracklist to clipboard.');
 }
-function clean(s = '') { return s.replace(/\s+/g, ' ').replace(/&nbsp;/g, ' ').trim(); }
 function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
