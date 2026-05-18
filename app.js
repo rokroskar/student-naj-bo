@@ -8,11 +8,18 @@ const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
 const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
-const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null };
+const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null };
+const spotifySdkReady = new Promise(resolve => {
+  window.onSpotifyWebPlaybackSDKReady = resolve;
+});
 
 $('spotifyLogin').addEventListener('click', toggleSpotifyConnection);
 setSpotifyConnected(false);
 $('loadLatest').addEventListener('click', loadLatestLists);
+$('listSelect').addEventListener('change', () => {
+  const opt = $('listSelect').selectedOptions[0];
+  if (opt?.value) loadTracklist(opt.value, opt.textContent);
+});
 $('loadUrl').addEventListener('click', () => loadTracklist($('detailUrl').value.trim()));
 $('copyTracks').addEventListener('click', copyTracks);
 $('createPlaylist').addEventListener('click', () => createPlaylistFromCurrentDay($('createPlaylist')));
@@ -121,7 +128,12 @@ function slugTitle(url) {
 function renderLists(lists) {
   $('lists').classList.remove('empty');
   $('lists').innerHTML = '';
+  $('listSelect').innerHTML = '<option value="">Select a day…</option>';
   for (const item of lists) {
+    const option = document.createElement('option');
+    option.value = item.url;
+    option.textContent = item.title;
+    $('listSelect').append(option);
     const row = document.createElement('div');
     row.className = 'listRow';
     const b = document.createElement('button');
@@ -146,6 +158,7 @@ function renderLists(lists) {
     $('lists').append(row);
   }
   updateDayPlayIndicators(state.currentPlayback);
+  if (state.currentUrl) $('listSelect').value = state.currentUrl;
 }
 
 async function loadTracklist(url, knownTitle = '') {
@@ -164,6 +177,7 @@ async function loadTracklist(url, knownTitle = '') {
     state.tracks = parsed.tracks;
     state.currentUrl = url;
     state.currentTitle = parsed.title || knownTitle || 'Radio Študent tracklist';
+    $('listSelect').value = state.currentUrl;
     localStorage.setItem(LAST_TRACKLIST_KEY, JSON.stringify({ url: state.currentUrl, title: state.currentTitle, at: Date.now() }));
     renderTracks();
     setPlaylistStatus(`${state.tracks.length} tracks`);
@@ -242,7 +256,7 @@ async function connectSpotify() {
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
-    scope: 'user-read-playback-state user-modify-playback-state playlist-modify-private playlist-modify-public',
+    scope: 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-modify-private playlist-modify-public',
     redirect_uri: location.origin + location.pathname,
     code_challenge_method: 'S256',
     code_challenge: challenge
@@ -260,6 +274,7 @@ async function handleSpotifyRedirect() {
   if (saved && saved.expiresAt > Date.now() + 60000) {
     state.spotifyToken = saved.access_token;
     setSpotifyConnected(true);
+    ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
     startPlaybackPolling();
   }
   if (!code) return;
@@ -285,6 +300,7 @@ async function handleSpotifyRedirect() {
     sessionStorage.setItem('spotifyToken', JSON.stringify(token));
     state.spotifyToken = token.access_token;
     setSpotifyConnected(true);
+    ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
     startPlaybackPolling();
     history.replaceState({}, '', location.origin + location.pathname);
     const pending = JSON.parse(sessionStorage.getItem('pendingPlay') || 'null');
@@ -297,6 +313,48 @@ async function handleSpotifyRedirect() {
     }
   } catch (err) {
     setStatus(err.message, true);
+  }
+}
+
+async function ensureWebPlayer() {
+  if (!state.spotifyToken) throw new Error('Connect Spotify first.');
+  if (state.webDeviceId) return state.webDeviceId;
+  if (!window.Spotify) await spotifySdkReady;
+  if (!window.Spotify?.Player) throw new Error('Spotify Web Playback SDK is not available in this browser.');
+
+  return new Promise((resolve, reject) => {
+    if (state.webPlayer) return resolve(state.webDeviceId);
+    const player = new Spotify.Player({
+      name: 'Študent naj bo!',
+      getOAuthToken: cb => cb(state.spotifyToken),
+      volume: 0.8
+    });
+    state.webPlayer = player;
+    player.addListener('ready', ({ device_id }) => {
+      state.webDeviceId = device_id;
+      spotifyApi('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [device_id], play: false }) })
+        .catch(err => console.warn('Could not transfer playback to web player', err))
+        .finally(() => resolve(device_id));
+    });
+    player.addListener('not_ready', ({ device_id }) => {
+      if (state.webDeviceId === device_id) state.webDeviceId = null;
+    });
+    player.addListener('initialization_error', ({ message }) => reject(new Error(message)));
+    player.addListener('authentication_error', ({ message }) => reject(new Error(message)));
+    player.addListener('account_error', ({ message }) => reject(new Error(message)));
+    player.addListener('playback_error', ({ message }) => console.warn('Spotify playback error', message));
+    player.connect().then(ok => {
+      if (!ok) reject(new Error('Could not connect Spotify web player.'));
+    });
+  });
+}
+
+async function getPlaybackDeviceId() {
+  try { return await ensureWebPlayer(); }
+  catch (err) {
+    console.warn('Using existing Spotify device instead of web player:', err);
+    const playback = await spotifyApi('/me/player').catch(() => null);
+    return playback?.device?.id || null;
   }
 }
 
@@ -691,7 +749,9 @@ async function playSingleTrack(track) {
     track.spotifyUri = match.uri;
     renderTracks();
     rememberQueueSource();
-    await spotifyApi('/me/player/play', { method: 'PUT', body: JSON.stringify({ uris: [match.uri] }) });
+    const deviceId = await getPlaybackDeviceId();
+    const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
+    await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: [match.uri] }) });
     startPlaybackPolling();
     setPlaylistStatus('Playing');
   } catch (err) {
@@ -717,17 +777,12 @@ async function playCurrentDay(indicatorEl = null) {
       $('playDay').textContent = '…';
     }
     const uris = await matchCurrentDay({ indicatorEl });
-    try {
-      rememberQueueSource();
-      await spotifyApi('/me/player/play', { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
-      startPlaybackPolling();
-      setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
-    } catch (playErr) {
-      const playlist = await createSpotifyPlaylist(uris);
-      rememberQueueSource();
-      window.open(playlist.external_urls.spotify, '_blank', 'noreferrer');
-      setPlaylistStatus(`Playlist opened (${uris.length}/${state.tracks.length})`);
-    }
+    rememberQueueSource();
+    const deviceId = await getPlaybackDeviceId();
+    const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
+    await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
+    startPlaybackPolling();
+    setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
   } catch (err) {
     setPlaylistStatus(err.message, true);
   } finally {

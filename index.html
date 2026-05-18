@@ -40,6 +40,9 @@
           <h2>Available lists</h2>
           <button id="loadLatest" class="iconButton" title="Refresh lists" aria-label="Refresh lists">↻</button>
         </div>
+        <select id="listSelect" class="listSelect" aria-label="Select Radio Študent day">
+          <option>Loading Radio Študent lists…</option>
+        </select>
         <div id="lists" class="lists empty">Loading Radio Študent lists…</div>
       </aside>
 
@@ -62,6 +65,7 @@
       </section>
     </section>
   </main>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script src="parser.js"></script>
   <script src="app.js"></script>
 </body>

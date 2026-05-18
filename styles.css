@@ -18,7 +18,7 @@ body {
   background: var(--bg);
 }
 a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-button, input {
+button, input, select {
   font: inherit;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -33,14 +33,14 @@ button {
 button:hover:not(:disabled) { background: #fff; border-color: var(--ink); }
 button:disabled { opacity: .4; cursor: not-allowed; }
 button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-input {
+input, select {
   background: var(--paper);
   color: var(--ink);
   padding: .62rem .75rem;
   min-width: 0;
   outline: none;
 }
-input:focus { border-color: var(--ink); }
+input:focus, select:focus { border-color: var(--ink); }
 .app { max-width: 1120px; margin: 0 auto; padding: 1rem; }
 .hero { padding: .75rem 0 1rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
 .topBar { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
@@ -94,6 +94,7 @@ h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05e
 .grid { display: grid; grid-template-columns: minmax(360px, .9fr) minmax(0, 1.1fr); gap: 1rem; align-items: start; }
 .sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); margin-bottom: .75rem; }
 .iconButton { width: 2rem; height: 2rem; padding: 0; display: grid; place-items: center; background: transparent; }
+.listSelect { display: none; width: 100%; margin-bottom: .75rem; }
 .lists { display: grid; gap: .35rem; max-height: calc(100vh - 240px); overflow: auto; }
 .listRow { display: grid; grid-template-columns: minmax(0, 1fr) 2.1rem; gap: .35rem; align-items: stretch; }
 .listItem { width: 100%; text-align: left; background: transparent; font-weight: 650; padding: .65rem .7rem; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
@@ -195,7 +196,8 @@ code { font: inherit; }
   .connectionDot { position: absolute; right: -.1rem; top: -.1rem; border: 2px solid var(--bg); }
   .grid { display: flex; flex-direction: column; gap: 1rem; }
   .grid > aside, .playerCard { width: 100%; }
-  .lists { max-height: none; overflow: visible; }
+  .listSelect { display: block; }
+  .lists { display: none; }
   .urlLoad input { flex-basis: 100%; }
   .urlLoad button { flex: 1; }
   .titleRow { display: grid; }
