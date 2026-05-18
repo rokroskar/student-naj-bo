@@ -96,12 +96,26 @@ function parseIndex(html) {
       .slice(0, 30);
   }
 
-  // Markdown-ish fallback for reader proxies.
+  // Markdown-ish fallback for reader proxies. Jina sometimes uses image links
+  // whose alt text is not the article title, so collect URLs first and derive a
+  // readable title from nearby date/subtitle text when needed.
   const seen = new Set();
-  return [...html.matchAll(/\[([^\]]*seznam[^\]]*)\]\((https:\/\/radiostudent\.si\/ostalo\/glasbene-opreme\/[^)]+)\)/gi)]
-    .map(m => ({ title: clean(m[1]), url: m[2] }))
-    .filter(x => !seen.has(x.url) && seen.add(x.url))
+  return [...html.matchAll(/\]\((https:\/\/radiostudent\.si\/ostalo\/glasbene-opreme\/[^)]+)\)/gi)]
+    .map(m => {
+      const url = m[1];
+      const before = html.slice(Math.max(0, m.index - 250), m.index);
+      const after = html.slice(m.index + m[0].length, m.index + m[0].length + 260);
+      const alt = (before.match(/!\[[^:\]]*:\s*([^\]]+)\]$/) || before.match(/\[([^\]]+)\]$/) || [,''])[1];
+      const date = (after.match(/(\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2})/) || [,''])[1];
+      const subtitle = after.split('\n').map(clean).filter(Boolean).find(line => !/^Vir:|^\/|^Published|^Markdown/i.test(line));
+      return { url, title: clean(alt || [date, subtitle].filter(Boolean).join(' / ') || slugTitle(url)) };
+    })
+    .filter(x => /seznam|glasbe|komadov/i.test(x.url) && !seen.has(x.url) && seen.add(x.url))
     .slice(0, 30);
+}
+
+function slugTitle(url) {
+  return decodeURIComponent(url.split('/').pop() || url).replace(/-/g, ' ');
 }
 
 function renderLists(lists) {
