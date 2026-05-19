@@ -127,11 +127,20 @@ function extractIndexMeta(after, url) {
   const dateLine = lines.find(line => /\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2}/.test(line));
   if (!dateLine) return '';
   const subtitle = lines.find(line => line !== dateLine && !/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/.test(line));
-  const range = (url.match(/-(\d{3,4})-(\d{3,4})(?:-|$)/) || []).slice(1, 3).map(formatSlugTime);
+  const range = extractTimeRangeFromSlug(url);
   const date = dateLine.match(/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/)?.[0];
   const start = dateLine.match(/[–-]\s*(\d{1,2}[.:]\d{2})/)?.[1]?.replace(':', '.');
   const time = range.length === 2 ? `${range[0]}–${range[1]}` : start;
   return [date && time ? `${date} – ${time}` : dateLine, subtitle].filter(Boolean).join(' / ');
+}
+
+function extractTimeRangeFromSlug(url) {
+  const slug = decodeURIComponent(url.split('/').pop() || '');
+  const nums = [...slug.matchAll(/(?:^|-)(\d{3,4})(?=-|$)/g)].map(m => m[1]);
+  // Ignore date pieces in slugs like 19-5-2026; time ranges are the 3/4 digit
+  // chunks after that, e.g. 700-1100 or 1400-1800.
+  if (nums.length < 2) return [];
+  return nums.slice(-2).map(formatSlugTime);
 }
 
 function formatSlugTime(value) {
