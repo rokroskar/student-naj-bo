@@ -9,7 +9,7 @@ const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
 const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
-const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null };
+const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false };
 const spotifySdkReady = new Promise(resolve => {
   window.onSpotifyWebPlaybackSDKReady = resolve;
 });
@@ -130,6 +130,7 @@ function slugTitle(url) {
 }
 
 function renderLists(lists) {
+  state.availableLists = lists;
   $('lists').classList.remove('empty');
   $('lists').innerHTML = '';
   $('listSelect').innerHTML = '<option value="">Select a day…</option>';
@@ -163,7 +164,9 @@ function renderLists(lists) {
   }
   updateDayPlayIndicators(state.currentPlayback);
   if (state.currentUrl) $('listSelect').value = state.currentUrl;
-  preloadTracklists(lists);
+  preloadTracklists(lists).then(() => {
+    if (state.spotifyToken) preMatchSpotifyForLists(lists);
+  });
 }
 
 async function preloadTracklists(lists) {
@@ -191,6 +194,42 @@ async function preloadTracklists(lists) {
   });
   await Promise.all(workers);
   $('preloadStatus').textContent = `cached ${done}/${lists.length} lists`;
+}
+
+async function preMatchSpotifyForLists(lists) {
+  if (!state.spotifyToken || state.preMatching) return;
+  state.preMatching = true;
+  try {
+    let listsDone = 0;
+    let matched = 0;
+    let searched = 0;
+    let skipped = 0;
+    for (const item of lists) {
+      const parsed = await getCachedOrFetchTracklist(item.url, item.title);
+      for (let i = 0; i < parsed.tracks.length; i++) {
+        const track = parsed.tracks[i];
+        if (getCachedSpotifyMatch(track) !== undefined) {
+          skipped++;
+          continue;
+        }
+        $('preloadStatus').textContent = `matching spotify ${listsDone + 1}/${lists.length} · ${i + 1}/${parsed.tracks.length}`;
+        const result = await findSpotifyTrack(track);
+        searched++;
+        if (result) matched++;
+        await new Promise(r => setTimeout(r, 80));
+      }
+      listsDone++;
+      $('preloadStatus').textContent = `matched ${matched}/${searched} new tracks · ${listsDone}/${lists.length} lists`;
+    }
+    $('preloadStatus').textContent = searched
+      ? `spotify cache ready · ${matched}/${searched} new matches (${skipped} cached)`
+      : `spotify cache ready · ${skipped} cached`;
+  } catch (err) {
+    console.warn('Could not pre-match Spotify tracks', err);
+    $('preloadStatus').textContent = 'spotify pre-match paused';
+  } finally {
+    state.preMatching = false;
+  }
 }
 
 async function loadTracklist(url, knownTitle = '', { force = false } = {}) {
@@ -336,6 +375,7 @@ async function handleSpotifyRedirect() {
     setSpotifyConnected(true);
     ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
     startPlaybackPolling();
+    if (state.availableLists.length) preMatchSpotifyForLists(state.availableLists);
   }
   if (!code) return;
 
@@ -362,6 +402,7 @@ async function handleSpotifyRedirect() {
     setSpotifyConnected(true);
     ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
     startPlaybackPolling();
+    if (state.availableLists.length) preMatchSpotifyForLists(state.availableLists);
     history.replaceState({}, '', location.origin + location.pathname);
     const pending = JSON.parse(sessionStorage.getItem('pendingPlay') || 'null');
     sessionStorage.removeItem('pendingPlay');

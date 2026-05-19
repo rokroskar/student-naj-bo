@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug } = require('../parser');
+const { cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseMarkdownTableTracks, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug } = require('../parser');
 
 test('parses regular ordered list with artist hyphen title and durations', () => {
   const html = `<main><div class="field--name-body"><ol>
@@ -91,6 +91,19 @@ test('parses bold markdown track rows from reader proxy', () => {
   assert.deepEqual(toTrack(cleanTrackLine('**03 - Big Thief - Simulation Swarm - 04:13**')), {
     artist: 'Big Thief', title: 'Simulation Swarm', query: 'Big Thief Simulation Swarm'
   });
+});
+
+test('parses markdown table tracklists with title and artist columns', () => {
+  const md = `| naslov_skladbe | izvajalec_skladbe | dolzina_skladbe |
+| --- | --- | --- |
+| Movement: thx for your love (feat. Nitz) | Oka | 04:47 |
+| Башибос | ΚΑΛБΥΛΑ | 05:07 |
+| A - Your Memory Has Been Magnetised | Vemberlain | 04:20 |`;
+  assert.deepEqual(parseMarkdownTableTracks(md), [
+    { artist: 'Oka', title: 'Movement: thx for your love (feat. Nitz)', query: 'Oka Movement: thx for your love (feat. Nitz)' },
+    { artist: 'ΚΑΛБΥΛΑ', title: 'Башибос', query: 'ΚΑΛБΥΛΑ Башибос' },
+    { artist: 'Vemberlain', title: 'A - Your Memory Has Been Magnetised', query: 'Vemberlain A - Your Memory Has Been Magnetised' }
+  ]);
 });
 
 test('extracts playlist titles from index markdown context and slug time range', () => {

@@ -114,6 +114,9 @@ function formatSlugTime(value) {
 }
 
 function parseTracksFromMarkdown(markdown) {
+  const tableTracks = parseMarkdownTableTracks(markdown);
+  if (tableTracks.length) return tableTracks;
+
   const lines = markdown.split('\n')
     .map(line => line.trim())
     .filter(line => line && !/^#{1,6}\s/.test(line))
@@ -122,6 +125,25 @@ function parseTracksFromMarkdown(markdown) {
     .filter(line => !/^!?\[.*\]\(.*\)/.test(line))
     .map(cleanTrackLine);
   return uniqueTracks(lines.map(toTrack).filter(Boolean));
+}
+
+function parseMarkdownTableTracks(markdown) {
+  const rows = markdown.split('\n').map(line => line.trim()).filter(line => /^\|.*\|$/.test(line));
+  if (rows.length < 3) return [];
+  const header = splitMarkdownTableRow(rows[0]).map(x => x.toLowerCase());
+  const titleIdx = header.findIndex(x => /naslov|title|skladb/.test(x));
+  const artistIdx = header.findIndex(x => /izvajalec|artist/.test(x));
+  if (titleIdx < 0 || artistIdx < 0) return [];
+  return uniqueTracks(rows.slice(2).map(row => {
+    const cols = splitMarkdownTableRow(row);
+    const title = cleanTrackLine(cols[titleIdx] || '');
+    const artist = cleanTrackLine(cols[artistIdx] || '');
+    return artist && title ? { artist, title, query: `${artist} ${title}` } : null;
+  }).filter(Boolean));
+}
+
+function splitMarkdownTableRow(row) {
+  return row.replace(/^\||\|$/g, '').split('|').map(cell => clean(cell.replace(/\\\|/g, '|')));
 }
 
 function parseTracksFromHtmlWithoutDom(html) {
@@ -155,5 +177,5 @@ function htmlToText(html) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { clean, cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug, isScheduleLine };
+  module.exports = { clean, cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseMarkdownTableTracks, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug, isScheduleLine };
 }
