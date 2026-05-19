@@ -113,12 +113,31 @@ function parseIndex(html) {
       const before = html.slice(Math.max(0, m.index - 250), m.index);
       const after = html.slice(m.index + m[0].length, m.index + m[0].length + 260);
       const alt = (before.match(/!\[[^:\]]*:\s*([^\]]+)\]$/) || before.match(/\[([^\]]+)\]$/) || [,''])[1];
-      const date = (after.match(/(\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2})/) || [,''])[1];
-      const subtitle = after.split('\n').map(clean).filter(Boolean).find(line => !/^Vir:|^\/|^Published|^Markdown/i.test(line));
-      return { url, title: clean(alt || [date, subtitle].filter(Boolean).join(' / ') || slugTitle(url)) };
+      const meta = extractIndexMeta(after, url);
+      return { url, title: clean(alt || meta || slugTitle(url)) };
     })
     .filter(x => /seznam|glasbe|komadov/i.test(x.url) && !seen.has(x.url) && seen.add(x.url))
     .slice(0, 30);
+}
+
+function extractIndexMeta(after, url) {
+  const lines = after.split('\n').map(clean).filter(Boolean)
+    .filter(line => !/^Vir:|^\/|^Published|^Markdown/i.test(line))
+    .filter(line => !/^!?\[/.test(line) && !/https?:\/\//.test(line));
+  const dateLine = lines.find(line => /\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2}/.test(line));
+  if (!dateLine) return '';
+  const subtitle = lines.find(line => line !== dateLine && !/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/.test(line));
+  const range = (url.match(/-(\d{3,4})-(\d{3,4})(?:-|$)/) || []).slice(1, 3).map(formatSlugTime);
+  const date = dateLine.match(/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/)?.[0];
+  const start = dateLine.match(/[–-]\s*(\d{1,2}[.:]\d{2})/)?.[1]?.replace(':', '.');
+  const time = range.length === 2 ? `${range[0]}–${range[1]}` : start;
+  return [date && time ? `${date} – ${time}` : dateLine, subtitle].filter(Boolean).join(' / ');
+}
+
+function formatSlugTime(value) {
+  if (!value) return '';
+  const padded = value.padStart(4, '0');
+  return `${parseInt(padded.slice(0, -2), 10)}.${padded.slice(-2)}`;
 }
 
 function slugTitle(url) {
