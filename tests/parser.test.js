@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown } = require('../parser');
+const { cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug } = require('../parser');
 
 test('parses regular ordered list with artist hyphen title and durations', () => {
   const html = `<main><div class="field--name-body"><ol>
@@ -91,6 +91,13 @@ test('parses bold markdown track rows from reader proxy', () => {
   assert.deepEqual(toTrack(cleanTrackLine('**03 - Big Thief - Simulation Swarm - 04:13**')), {
     artist: 'Big Thief', title: 'Simulation Swarm', query: 'Big Thief Simulation Swarm'
   });
+});
+
+test('extracts playlist titles from index markdown context and slug time range', () => {
+  const url = 'https://radiostudent.si/ostalo/glasbene-opreme/seznam-skladb-za-19-5-2026-700-1100';
+  const after = `\n\nVir: Zajem zaslona\n\n19. 5. 2026 – 7.00\n\nIn a world without a future every promise is a lie\n\n[![Image 2](https://example.com/img.jpg)](https://example.com/next)`;
+  assert.deepEqual(extractTimeRangeFromSlug(url), ['7.00', '11.00']);
+  assert.equal(parseIndexTitleFromMarkdownContext(after, url), '19. 5. 2026 – 7.00–11.00 / In a world without a future every promise is a lie');
 });
 
 test('markdown parser ignores navigation and event links with hyphenated URLs', () => {

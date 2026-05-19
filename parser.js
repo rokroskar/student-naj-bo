@@ -86,6 +86,33 @@ function normaliseTrackPart(value) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function parseIndexTitleFromMarkdownContext(after, url) {
+  const lines = after.split('\n').map(clean).filter(Boolean)
+    .filter(line => !/^Vir:|^\/|^Published|^Markdown/i.test(line))
+    .filter(line => !/^!?\[/.test(line) && !/https?:\/\//.test(line));
+  const dateLine = lines.find(line => /\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2}/.test(line));
+  if (!dateLine) return '';
+  const subtitle = lines.find(line => line !== dateLine && !/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/.test(line));
+  const range = extractTimeRangeFromSlug(url);
+  const date = dateLine.match(/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/)?.[0];
+  const start = dateLine.match(/[–-]\s*(\d{1,2}[.:]\d{2})/)?.[1]?.replace(':', '.');
+  const time = range.length === 2 ? `${range[0]}–${range[1]}` : start;
+  return [date && time ? `${date} – ${time}` : dateLine, subtitle].filter(Boolean).join(' / ');
+}
+
+function extractTimeRangeFromSlug(url) {
+  const slug = decodeURIComponent(url.split('/').pop() || '');
+  const nums = [...slug.matchAll(/(?:^|-)(\d{3,4})(?=-|$)/g)].map(m => m[1]);
+  if (nums.length < 2) return [];
+  return nums.slice(-2).map(formatSlugTime);
+}
+
+function formatSlugTime(value) {
+  if (!value) return '';
+  const padded = value.padStart(4, '0');
+  return `${parseInt(padded.slice(0, -2), 10)}.${padded.slice(-2)}`;
+}
+
 function parseTracksFromMarkdown(markdown) {
   const lines = markdown.split('\n')
     .map(line => line.trim())
@@ -128,5 +155,5 @@ function htmlToText(html) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { clean, cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, isScheduleLine };
+  module.exports = { clean, cleanTrackLine, toTrack, parseTracksFromHtml, parseTracksFromMarkdown, parseIndexTitleFromMarkdownContext, extractTimeRangeFromSlug, isScheduleLine };
 }

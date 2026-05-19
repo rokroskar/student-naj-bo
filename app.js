@@ -28,7 +28,7 @@ $('playDay').addEventListener('click', () => {
   if (state.currentPlayback?.is_playing && source?.url === state.currentUrl) return spotifyPlayPause(state.currentPlayback);
   playCurrentDay($('playDay'));
 });
-$('openSpotify').addEventListener('click', () => openSpotifySearch(state.tracks[0]?.query || state.currentTitle));
+$('openSpotify').addEventListener('click', () => matchTracksOnly($('openSpotify')));
 handleSpotifyRedirect();
 restoreLastTracklist();
 loadLatestLists();
@@ -121,32 +121,7 @@ function parseIndex(html) {
 }
 
 function extractIndexMeta(after, url) {
-  const lines = after.split('\n').map(clean).filter(Boolean)
-    .filter(line => !/^Vir:|^\/|^Published|^Markdown/i.test(line))
-    .filter(line => !/^!?\[/.test(line) && !/https?:\/\//.test(line));
-  const dateLine = lines.find(line => /\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}\s*[–-]\s*\d{1,2}[.:]\d{2}/.test(line));
-  if (!dateLine) return '';
-  const subtitle = lines.find(line => line !== dateLine && !/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/.test(line));
-  const range = extractTimeRangeFromSlug(url);
-  const date = dateLine.match(/\d{1,2}\.\s*\d{1,2}\.\s*20\d{2}/)?.[0];
-  const start = dateLine.match(/[–-]\s*(\d{1,2}[.:]\d{2})/)?.[1]?.replace(':', '.');
-  const time = range.length === 2 ? `${range[0]}–${range[1]}` : start;
-  return [date && time ? `${date} – ${time}` : dateLine, subtitle].filter(Boolean).join(' / ');
-}
-
-function extractTimeRangeFromSlug(url) {
-  const slug = decodeURIComponent(url.split('/').pop() || '');
-  const nums = [...slug.matchAll(/(?:^|-)(\d{3,4})(?=-|$)/g)].map(m => m[1]);
-  // Ignore date pieces in slugs like 19-5-2026; time ranges are the 3/4 digit
-  // chunks after that, e.g. 700-1100 or 1400-1800.
-  if (nums.length < 2) return [];
-  return nums.slice(-2).map(formatSlugTime);
-}
-
-function formatSlugTime(value) {
-  if (!value) return '';
-  const padded = value.padStart(4, '0');
-  return `${parseInt(padded.slice(0, -2), 10)}.${padded.slice(-2)}`;
+  return parseIndexTitleFromMarkdownContext(after, url);
 }
 
 function slugTitle(url) {
@@ -249,7 +224,7 @@ function renderTracks() {
     const missing = cached === null || track.spotifyMissing;
     if (track.spotifyUri) li.dataset.spotifyUri = track.spotifyUri;
     if (missing) li.classList.add('missing');
-    li.innerHTML = `<div class="trackTop"><span class="trackMain"><span class="trackTitle">${escapeHtml(track.artist)}</span> — ${escapeHtml(track.title)}${missing ? '<span class="missingMark" title="Not found on Spotify">not found</span>' : ''}</span><button class="trackPlay" title="Play this track in Spotify" aria-label="Play ${escapeHtml(track.artist)} - ${escapeHtml(track.title)}">▶</button></div>`;
+    li.innerHTML = `<div class="trackTop"><span class="trackMain"><span class="trackTitle">${escapeHtml(track.artist)}</span> — ${escapeHtml(track.title)}${track.spotifyUri ? '<span class="foundMark" title="Matched on Spotify">matched</span>' : ''}${missing ? '<span class="missingMark" title="Not found on Spotify">not found</span>' : ''}</span><button class="trackPlay" title="Play this track in Spotify" aria-label="Play ${escapeHtml(track.artist)} - ${escapeHtml(track.title)}">▶</button></div>`;
     li.querySelector('.trackPlay').addEventListener('click', async () => {
       if (li.classList.contains('playing')) {
         await updateNowPlaying();
@@ -670,6 +645,28 @@ async function createSpotifyPlaylist(uris) {
   return playlist;
 }
 
+async function matchTracksOnly(button) {
+  const originalText = button?.textContent;
+  try {
+    if (!state.spotifyToken) return connectSpotify();
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Matching…';
+    }
+    const uris = await matchCurrentDay({ indicatorEl: button });
+    setPlaylistStatus(`Matched ${uris.length}/${state.tracks.length}`);
+  } catch (err) {
+    setPlaylistStatus(err.message, true);
+  } finally {
+    clearPlaylistProgress();
+    if (button) {
+      button.disabled = !state.tracks.length;
+      button.textContent = originalText || 'Match tracks';
+      button.title = 'Match tracks';
+    }
+  }
+}
+
 async function createPlaylistFromCurrentDay(button) {
   const originalText = button?.textContent;
   try {
@@ -837,8 +834,6 @@ async function sha256Base64Url(input) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function openSpotifySearch(query) { window.open(spotifySearchUrl(query), '_blank', 'noreferrer'); }
-function spotifySearchUrl(query) { return 'https://open.spotify.com/search/' + encodeURIComponent(query); }
 async function copyTracks() {
   await navigator.clipboard.writeText(state.tracks.map(t => `${t.artist} - ${t.title}`).join('\n'));
   setStatus('Copied tracklist to clipboard.');

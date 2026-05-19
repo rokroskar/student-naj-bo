@@ -166,15 +166,16 @@ h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05e
 .tracks li { padding: .62rem 0; border-bottom: 1px solid var(--line); }
 .tracks li.playing { background: color-mix(in srgb, var(--accent), transparent 88%); padding-left: .4rem; padding-right: .4rem; }
 .tracks li.missing { color: var(--muted); }
-.missingMark {
+.missingMark, .foundMark {
   display: inline-block;
   margin-left: .55rem;
-  color: var(--danger);
   font-size: .72rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
 }
+.missingMark { color: var(--danger); }
+.foundMark { color: #137b38; }
 .trackTop { display: flex; justify-content: space-between; gap: .75rem; align-items: center; }
 .trackMain { min-width: 0; }
 .trackTitle { font-weight: 800; }
