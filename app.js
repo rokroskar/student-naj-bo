@@ -3,6 +3,7 @@ const SPOTIFY_CACHE_KEY = 'rsSpotifyTrackCache:v1';
 const QUEUE_SOURCE_KEY = 'rsSpotifyQueueSource:v1';
 const LAST_TRACKLIST_KEY = 'rsLastTracklist:v1';
 const TRACKLIST_CACHE_KEY = 'rsTracklistCache:v1';
+const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 // Optional for GitHub Pages: paste your Spotify app Client ID here.
 // This is not a secret when using PKCE; it is safe to ship in static frontend code.
 const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
@@ -33,6 +34,10 @@ $('openSpotify').addEventListener('click', () => matchTracksOnly($('openSpotify'
 handleSpotifyRedirect();
 restoreLastTracklist();
 loadLatestLists();
+setInterval(() => loadLatestLists({ quiet: true }), REFRESH_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) loadLatestLists({ quiet: true });
+});
 
 function setStatus(message, isError = false) {
   $('status').textContent = message || '';
@@ -76,18 +81,27 @@ async function fetchText(url) {
   return res.text();
 }
 
-async function loadLatestLists() {
+async function loadLatestLists({ quiet = false } = {}) {
   try {
-    setStatus('Loading Radio Študent lists…');
-    $('lists').textContent = 'Loading…';
+    if (!quiet) {
+      setStatus('Loading Radio Študent lists…');
+      $('lists').textContent = 'Loading…';
+    } else {
+      $('preloadStatus').textContent = 'refreshing lists…';
+    }
     const html = await fetchText(RS_INDEX);
     const lists = parseIndex(html);
     if (!lists.length) throw new Error('Could not find tracklist links. Try another fetch mode.');
     renderLists(lists);
-    setStatus(`Found ${lists.length} recent lists.`);
+    if (!quiet) setStatus(`Found ${lists.length} recent lists.`);
   } catch (err) {
-    $('lists').textContent = 'Nothing loaded.';
-    setStatus(err.message, true);
+    if (!quiet) {
+      $('lists').textContent = 'Nothing loaded.';
+      setStatus(err.message, true);
+    } else {
+      $('preloadStatus').textContent = 'refresh failed';
+      console.warn('Quiet refresh failed', err);
+    }
   }
 }
 
