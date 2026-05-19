@@ -95,6 +95,7 @@ h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05e
 .sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); margin-bottom: .75rem; }
 .iconButton { width: 2rem; height: 2rem; padding: 0; display: grid; place-items: center; background: transparent; }
 .listSelect { display: none; width: 100%; margin-bottom: .75rem; }
+.preloadStatus { min-height: 1.1rem; margin: 0 0 .55rem; color: var(--muted); font-size: .78rem; }
 .lists { display: grid; gap: .35rem; max-height: calc(100vh - 240px); overflow: auto; }
 .listRow { display: grid; grid-template-columns: minmax(0, 1fr) 2.1rem; gap: .35rem; align-items: stretch; }
 .listItem { width: 100%; text-align: left; background: transparent; font-weight: 650; padding: .65rem .7rem; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }

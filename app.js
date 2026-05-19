@@ -2,6 +2,7 @@ const RS_INDEX = 'https://radiostudent.si/ostalo/glasbene-opreme';
 const SPOTIFY_CACHE_KEY = 'rsSpotifyTrackCache:v1';
 const QUEUE_SOURCE_KEY = 'rsSpotifyQueueSource:v1';
 const LAST_TRACKLIST_KEY = 'rsLastTracklist:v1';
+const TRACKLIST_CACHE_KEY = 'rsTracklistCache:v1';
 // Optional for GitHub Pages: paste your Spotify app Client ID here.
 // This is not a secret when using PKCE; it is safe to ship in static frontend code.
 const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
@@ -162,9 +163,37 @@ function renderLists(lists) {
   }
   updateDayPlayIndicators(state.currentPlayback);
   if (state.currentUrl) $('listSelect').value = state.currentUrl;
+  preloadTracklists(lists);
 }
 
-async function loadTracklist(url, knownTitle = '') {
+async function preloadTracklists(lists) {
+  const cache = readTracklistCache();
+  const pending = lists.filter(item => !cache[item.url]);
+  if (!pending.length) {
+    $('preloadStatus').textContent = `cached ${lists.length}/${lists.length} lists`;
+    return;
+  }
+
+  let done = lists.length - pending.length;
+  $('preloadStatus').textContent = `caching ${done}/${lists.length} lists…`;
+  const workers = Array.from({ length: Math.min(2, pending.length) }, async () => {
+    while (pending.length) {
+      const item = pending.shift();
+      try {
+        await fetchAndCacheTracklist(item.url, item.title);
+      } catch (err) {
+        console.warn('Could not preload tracklist', item.url, err);
+      } finally {
+        done++;
+        $('preloadStatus').textContent = `caching ${done}/${lists.length} lists…`;
+      }
+    }
+  });
+  await Promise.all(workers);
+  $('preloadStatus').textContent = `cached ${done}/${lists.length} lists`;
+}
+
+async function loadTracklist(url, knownTitle = '', { force = false } = {}) {
   if (!url) return setStatus('Paste a Radio Študent tracklist URL first.', true);
   try {
     $('playlistTitle').textContent = knownTitle || 'Loading tracklist…';
@@ -174,9 +203,9 @@ async function loadTracklist(url, knownTitle = '') {
     $('tracks').classList.add('empty');
     $('tracks').textContent = 'Loading tracklist…';
     setPlaylistStatus('');
-    const html = await fetchText(url);
-    const parsed = parseDetail(html, knownTitle);
-    if (!parsed.tracks.length) throw new Error('No tracks found. Try another fetch mode or a different URL.');
+
+    const parsed = force ? await fetchAndCacheTracklist(url, knownTitle) : await getCachedOrFetchTracklist(url, knownTitle);
+    if (!parsed.tracks.length) throw new Error('No tracks found. Try reporting this playlist URL.');
     state.tracks = parsed.tracks;
     state.currentUrl = url;
     state.currentTitle = parsed.title || knownTitle || 'Radio Študent tracklist';
@@ -187,6 +216,34 @@ async function loadTracklist(url, knownTitle = '') {
   } catch (err) {
     setPlaylistStatus(err.message, true);
   }
+}
+
+async function getCachedOrFetchTracklist(url, knownTitle = '') {
+  const cached = readTracklistCache()[url];
+  if (cached?.tracks?.length) return cached;
+  return fetchAndCacheTracklist(url, knownTitle);
+}
+
+async function fetchAndCacheTracklist(url, knownTitle = '') {
+  const html = await fetchText(url);
+  const parsed = parseDetail(html, knownTitle);
+  const value = { title: parsed.title || knownTitle || slugTitle(url), tracks: parsed.tracks, at: Date.now() };
+  if (value.tracks.length) {
+    const cache = readTracklistCache();
+    cache[url] = value;
+    writeTracklistCache(cache);
+  }
+  return value;
+}
+
+function readTracklistCache() {
+  try { return JSON.parse(localStorage.getItem(TRACKLIST_CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function writeTracklistCache(cache) {
+  const entries = Object.entries(cache).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 80);
+  localStorage.setItem(TRACKLIST_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
 }
 
 async function restoreLastTracklist() {
