@@ -668,6 +668,17 @@ function updateDayPlayIndicators(playback) {
   }
 }
 
+function activateSpotifyElement() {
+  try { state.webPlayer?.activateElement?.(); }
+  catch (err) { console.warn('Could not activate Spotify player element', err); }
+}
+
+async function queueSpotifyUri(uri, deviceId) {
+  const params = new URLSearchParams({ uri });
+  if (deviceId) params.set('device_id', deviceId);
+  await spotifyApi('/me/player/queue?' + params, { method: 'POST' });
+}
+
 async function spotifyTransport(action, deviceId) {
   try {
     const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
@@ -679,6 +690,7 @@ async function spotifyTransport(action, deviceId) {
 }
 
 async function spotifyPlayPause(playback) {
+  activateSpotifyElement();
   try {
     const deviceId = playback.device?.id;
     const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
@@ -875,6 +887,7 @@ function levenshtein(a, b) {
 }
 
 async function playSingleTrack(track) {
+  activateSpotifyElement();
   try {
     if (!state.spotifyToken) {
       sessionStorage.setItem('pendingPlay', JSON.stringify({ url: state.currentUrl, title: state.currentTitle }));
@@ -897,6 +910,7 @@ async function playSingleTrack(track) {
 }
 
 async function playCurrentDay(indicatorEl = null) {
+  activateSpotifyElement();
   const originalIndicatorText = indicatorEl?.textContent;
   try {
     if (!state.tracks.length) return setStatus('Load a Radio Študent day first.', true);
@@ -913,12 +927,44 @@ async function playCurrentDay(indicatorEl = null) {
     } else {
       $('playDay').textContent = '…';
     }
-    const uris = await matchCurrentDay({ indicatorEl });
     rememberQueueSource();
     const deviceId = await getPlaybackDeviceId();
     const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
-    await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
-    startPlaybackPolling();
+    const uris = [];
+    let started = false;
+
+    setPlaylistStatus(`Matching 0/${state.tracks.length}`);
+    for (let i = 0; i < state.tracks.length; i++) {
+      const t = state.tracks[i];
+      if (indicatorEl) indicatorEl.title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
+      setPlaylistStatus(started ? `Playing · matching ${i + 1}/${state.tracks.length}` : `Matching ${i + 1}/${state.tracks.length}`);
+      setPlaylistProgress(i, state.tracks.length);
+
+      const match = await findSpotifyTrack(t);
+      if (match) {
+        t.spotifyUri = match.uri;
+        t.spotifyName = match.name;
+        t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
+        uris.push(match.uri);
+
+        if (!started) {
+          await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: [match.uri] }) });
+          startPlaybackPolling();
+          started = true;
+          setPlaylistStatus(`Playing · queueing ${i + 1}/${state.tracks.length}`);
+        } else {
+          await queueSpotifyUri(match.uri, deviceId).catch(err => console.warn('Could not queue track', err));
+        }
+      } else {
+        t.spotifyMissing = true;
+        console.warn('No confident Spotify match:', t);
+      }
+      renderTracks();
+      await new Promise(r => setTimeout(r, 80));
+    }
+
+    setPlaylistProgress(state.tracks.length, state.tracks.length);
+    if (!uris.length) throw new Error('Spotify did not match any tracks.');
     setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
   } catch (err) {
     setPlaylistStatus(err.message, true);
