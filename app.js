@@ -673,10 +673,24 @@ function activateSpotifyElement() {
   catch (err) { console.warn('Could not activate Spotify player element', err); }
 }
 
-async function queueSpotifyUri(uri, deviceId) {
-  const params = new URLSearchParams({ uri });
-  if (deviceId) params.set('device_id', deviceId);
-  await spotifyApi('/me/player/queue?' + params, { method: 'POST' });
+async function replacePlaybackKeepingCurrentTrack(uris, deviceId) {
+  try {
+    const playback = await spotifyApi('/me/player').catch(() => null);
+    const currentUri = playback?.item?.uri;
+    const offset = Math.max(0, uris.indexOf(currentUri));
+    const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
+    await spotifyApi('/me/player/play' + query, {
+      method: 'PUT',
+      body: JSON.stringify({
+        uris: uris.slice(0, 100),
+        offset: { position: offset < 0 ? 0 : offset },
+        position_ms: playback?.progress_ms || 0
+      })
+    });
+    startPlaybackPolling();
+  } catch (err) {
+    console.warn('Could not replace Spotify playback queue', err);
+  }
 }
 
 async function spotifyTransport(action, deviceId) {
@@ -932,6 +946,8 @@ async function playCurrentDay(indicatorEl = null) {
     const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
     const uris = [];
     let started = false;
+    let startedWith = 0;
+    const startThreshold = 8;
 
     setPlaylistStatus(`Matching 0/${state.tracks.length}`);
     for (let i = 0; i < state.tracks.length; i++) {
@@ -947,13 +963,14 @@ async function playCurrentDay(indicatorEl = null) {
         t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
         uris.push(match.uri);
 
-        if (!started) {
-          await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: [match.uri] }) });
+        // Start once we have a small batch, not just the first song. Starting
+        // with a single URI can leave an old Spotify queue behind it.
+        if (!started && (uris.length >= startThreshold || i === state.tracks.length - 1)) {
+          await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
           startPlaybackPolling();
           started = true;
-          setPlaylistStatus(`Playing · queueing ${i + 1}/${state.tracks.length}`);
-        } else {
-          await queueSpotifyUri(match.uri, deviceId).catch(err => console.warn('Could not queue track', err));
+          startedWith = uris.length;
+          setPlaylistStatus(`Playing · matching ${i + 1}/${state.tracks.length}`);
         }
       } else {
         t.spotifyMissing = true;
@@ -965,6 +982,11 @@ async function playCurrentDay(indicatorEl = null) {
 
     setPlaylistProgress(state.tracks.length, state.tracks.length);
     if (!uris.length) throw new Error('Spotify did not match any tracks.');
+    if (started && uris.length > startedWith) await replacePlaybackKeepingCurrentTrack(uris, deviceId);
+    if (!started) {
+      await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
+      startPlaybackPolling();
+    }
     setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
   } catch (err) {
     setPlaylistStatus(err.message, true);
