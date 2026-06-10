@@ -10,7 +10,7 @@ const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
 const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
-const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false };
+const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false, appQueue: null, enforcingQueue: false };
 const spotifySdkReady = new Promise(resolve => {
   window.onSpotifyWebPlaybackSDKReady = resolve;
 });
@@ -588,6 +588,7 @@ async function updateNowPlaying() {
     const data = await safeJson(res);
     if (!res.ok || !data?.item) return renderNowPlaying(null);
     renderNowPlaying(data);
+    enforceAppQueue(data);
   } catch (err) {
     console.warn('Could not update now playing', err);
   }
@@ -673,6 +674,48 @@ function activateSpotifyElement() {
   catch (err) { console.warn('Could not activate Spotify player element', err); }
 }
 
+function startAppQueue(sourceUrl, uris = []) {
+  state.appQueue = { sourceUrl, uris: [...uris], index: 0, startedAt: Date.now() };
+}
+
+function appendToAppQueue(uri) {
+  if (!state.appQueue) startAppQueue(state.currentUrl, []);
+  if (!state.appQueue.uris.includes(uri)) state.appQueue.uris.push(uri);
+}
+
+async function playAppQueueIndex(index, deviceId = state.webDeviceId) {
+  if (!state.appQueue?.uris[index]) return;
+  state.appQueue.index = index;
+  const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
+  await spotifyApi('/me/player/play' + query, {
+    method: 'PUT',
+    body: JSON.stringify({ uris: [state.appQueue.uris[index]] })
+  });
+  startPlaybackPolling();
+}
+
+async function enforceAppQueue(playback) {
+  const queue = state.appQueue;
+  if (!queue || state.enforcingQueue || !playback?.item?.uri || queue.sourceUrl !== state.currentUrl) return;
+  const currentIndex = queue.uris.indexOf(playback.item.uri);
+  if (currentIndex >= 0) {
+    queue.index = currentIndex;
+    return;
+  }
+  const nextIndex = queue.index + 1;
+  if (queue.uris[nextIndex]) {
+    state.enforcingQueue = true;
+    try {
+      await playAppQueueIndex(nextIndex, playback.device?.id || state.webDeviceId);
+      setPlaylistStatus(`Playing ${nextIndex + 1}/${queue.uris.length}`);
+    } catch (err) {
+      console.warn('Could not enforce app queue', err);
+    } finally {
+      state.enforcingQueue = false;
+    }
+  }
+}
+
 async function replacePlaybackKeepingCurrentTrack(uris, deviceId) {
   try {
     const playback = await spotifyApi('/me/player').catch(() => null);
@@ -695,6 +738,13 @@ async function replacePlaybackKeepingCurrentTrack(uris, deviceId) {
 
 async function spotifyTransport(action, deviceId) {
   try {
+    if (state.appQueue && (action === 'next' || action === 'previous')) {
+      const delta = action === 'next' ? 1 : -1;
+      const nextIndex = Math.max(0, Math.min(state.appQueue.uris.length - 1, state.appQueue.index + delta));
+      await playAppQueueIndex(nextIndex, deviceId || state.webDeviceId);
+      setTimeout(updateNowPlaying, 500);
+      return;
+    }
     const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
     await spotifyApi(`/me/player/${action}${query}`, { method: 'POST' });
     setTimeout(updateNowPlaying, 700);
@@ -911,6 +961,7 @@ async function playSingleTrack(track) {
     const match = await findSpotifyTrack(track);
     if (!match) throw new Error('Spotify did not confidently match this track.');
     track.spotifyUri = match.uri;
+    state.appQueue = null;
     renderTracks();
     rememberQueueSource();
     const deviceId = await getPlaybackDeviceId();
@@ -943,11 +994,9 @@ async function playCurrentDay(indicatorEl = null) {
     }
     rememberQueueSource();
     const deviceId = await getPlaybackDeviceId();
-    const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
     const uris = [];
     let started = false;
-    let startedWith = 0;
-    const startThreshold = 8;
+    startAppQueue(state.currentUrl, []);
 
     setPlaylistStatus(`Matching 0/${state.tracks.length}`);
     for (let i = 0; i < state.tracks.length; i++) {
@@ -962,14 +1011,11 @@ async function playCurrentDay(indicatorEl = null) {
         t.spotifyName = match.name;
         t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
         uris.push(match.uri);
+        appendToAppQueue(match.uri);
 
-        // Start once we have a small batch, not just the first song. Starting
-        // with a single URI can leave an old Spotify queue behind it.
-        if (!started && (uris.length >= startThreshold || i === state.tracks.length - 1)) {
-          await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
-          startPlaybackPolling();
+        if (!started) {
+          await playAppQueueIndex(0, deviceId);
           started = true;
-          startedWith = uris.length;
           setPlaylistStatus(`Playing · matching ${i + 1}/${state.tracks.length}`);
         }
       } else {
@@ -982,11 +1028,6 @@ async function playCurrentDay(indicatorEl = null) {
 
     setPlaylistProgress(state.tracks.length, state.tracks.length);
     if (!uris.length) throw new Error('Spotify did not match any tracks.');
-    if (started && uris.length > startedWith) await replacePlaybackKeepingCurrentTrack(uris, deviceId);
-    if (!started) {
-      await spotifyApi('/me/player/play' + query, { method: 'PUT', body: JSON.stringify({ uris: uris.slice(0, 100) }) });
-      startPlaybackPolling();
-    }
     setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
   } catch (err) {
     setPlaylistStatus(err.message, true);
