@@ -584,9 +584,9 @@ async function updateNowPlaying() {
     const res = await fetch('https://api.spotify.com/v1/me/player', {
       headers: { Authorization: 'Bearer ' + state.spotifyToken }
     });
-    if (res.status === 204 || res.status === 202) return renderNowPlaying(null);
+    if (res.status === 204 || res.status === 202) return handleNoCurrentPlayback();
     const data = await safeJson(res);
-    if (!res.ok || !data?.item) return renderNowPlaying(null);
+    if (!res.ok || !data?.item) return handleNoCurrentPlayback();
     renderNowPlaying(data);
     enforceAppQueue(data);
   } catch (err) {
@@ -694,12 +694,41 @@ async function playAppQueueIndex(index, deviceId = state.webDeviceId) {
   startPlaybackPolling();
 }
 
+async function handleNoCurrentPlayback() {
+  renderNowPlaying(null);
+  const queue = state.appQueue;
+  if (!queue || state.enforcingQueue) return;
+  const nextIndex = queue.index + 1;
+  if (!queue.uris[nextIndex]) return;
+  state.enforcingQueue = true;
+  try {
+    await playAppQueueIndex(nextIndex, state.webDeviceId);
+    setPlaylistStatus(`Playing ${nextIndex + 1}/${queue.uris.length}`);
+  } catch (err) {
+    console.warn('Could not advance app queue after playback stopped', err);
+  } finally {
+    state.enforcingQueue = false;
+  }
+}
+
 async function enforceAppQueue(playback) {
   const queue = state.appQueue;
-  if (!queue || state.enforcingQueue || !playback?.item?.uri || queue.sourceUrl !== state.currentUrl) return;
+  if (!queue || state.enforcingQueue || !playback?.item?.uri) return;
   const currentIndex = queue.uris.indexOf(playback.item.uri);
   if (currentIndex >= 0) {
     queue.index = currentIndex;
+    const remainingMs = (playback.item.duration_ms || 0) - (playback.progress_ms || 0);
+    if (!playback.is_playing && remainingMs >= 0 && remainingMs < 5000 && queue.uris[currentIndex + 1]) {
+      state.enforcingQueue = true;
+      try {
+        await playAppQueueIndex(currentIndex + 1, playback.device?.id || state.webDeviceId);
+        setPlaylistStatus(`Playing ${currentIndex + 2}/${queue.uris.length}`);
+      } catch (err) {
+        console.warn('Could not advance app queue', err);
+      } finally {
+        state.enforcingQueue = false;
+      }
+    }
     return;
   }
   const nextIndex = queue.index + 1;
