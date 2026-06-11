@@ -10,7 +10,7 @@ const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
 const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
-const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false, appQueue: null, enforcingQueue: false };
+const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false, appQueue: null, enforcingQueue: false, appQueueTimer: null };
 const spotifySdkReady = new Promise(resolve => {
   window.onSpotifyWebPlaybackSDKReady = resolve;
 });
@@ -458,6 +458,7 @@ async function ensureWebPlayer() {
     player.addListener('authentication_error', ({ message }) => reject(new Error(message)));
     player.addListener('account_error', ({ message }) => reject(new Error(message)));
     player.addListener('playback_error', ({ message }) => console.warn('Spotify playback error', message));
+    player.addListener('player_state_changed', sdkState => handleSdkPlayerState(sdkState));
     player.connect().then(ok => {
       if (!ok) reject(new Error('Could not connect Spotify web player.'));
     });
@@ -550,6 +551,7 @@ function setCachedSpotifyMatch(track, spotifyTrack) {
       id: spotifyTrack.id,
       uri: spotifyTrack.uri,
       name: spotifyTrack.name,
+      duration_ms: spotifyTrack.duration_ms,
       artists: spotifyTrack.artists?.map(a => ({ id: a.id, name: a.name })) || [],
       external_urls: spotifyTrack.external_urls || {}
     }
@@ -675,12 +677,57 @@ function activateSpotifyElement() {
 }
 
 function startAppQueue(sourceUrl, uris = []) {
-  state.appQueue = { sourceUrl, uris: [...uris], index: 0, startedAt: Date.now() };
+  clearAppQueueTimer();
+  state.appQueue = { sourceUrl, uris: [...uris], durations: {}, index: 0, startedAt: Date.now() };
 }
 
-function appendToAppQueue(uri) {
+function appendToAppQueue(uri, durationMs = 0) {
   if (!state.appQueue) startAppQueue(state.currentUrl, []);
   if (!state.appQueue.uris.includes(uri)) state.appQueue.uris.push(uri);
+  if (durationMs) state.appQueue.durations[uri] = durationMs;
+}
+
+function clearAppQueueTimer() {
+  if (state.appQueueTimer) clearTimeout(state.appQueueTimer);
+  state.appQueueTimer = null;
+}
+
+function scheduleAppQueueAdvance(delayMs) {
+  clearAppQueueTimer();
+  if (!state.appQueue || !Number.isFinite(delayMs) || delayMs <= 0) return;
+  state.appQueueTimer = setTimeout(() => advanceAppQueue().catch(err => console.warn('Could not auto-advance app queue', err)), Math.max(800, delayMs));
+}
+
+async function advanceAppQueue() {
+  const queue = state.appQueue;
+  if (!queue || state.enforcingQueue) return;
+  const nextIndex = queue.index + 1;
+  if (!queue.uris[nextIndex]) return;
+  state.enforcingQueue = true;
+  try {
+    await playAppQueueIndex(nextIndex, state.webDeviceId);
+    setPlaylistStatus(`Playing ${nextIndex + 1}/${queue.uris.length}`);
+  } finally {
+    state.enforcingQueue = false;
+  }
+}
+
+function handleSdkPlayerState(sdkState) {
+  const queue = state.appQueue;
+  const current = sdkState?.track_window?.current_track;
+  if (!queue || !current?.uri) return;
+  const idx = queue.uris.indexOf(current.uri);
+  if (idx < 0) return;
+  queue.index = idx;
+  if (!sdkState.paused) {
+    const duration = sdkState.duration || queue.durations[current.uri] || 0;
+    const remaining = duration ? duration - (sdkState.position || 0) + 900 : 0;
+    scheduleAppQueueAdvance(remaining);
+  } else {
+    clearAppQueueTimer();
+    const duration = sdkState.duration || queue.durations[current.uri] || 0;
+    if (duration && duration - (sdkState.position || 0) < 1200) advanceAppQueue().catch(err => console.warn('Could not advance ended track', err));
+  }
 }
 
 async function playAppQueueIndex(index, deviceId = state.webDeviceId) {
@@ -691,6 +738,8 @@ async function playAppQueueIndex(index, deviceId = state.webDeviceId) {
     method: 'PUT',
     body: JSON.stringify({ uris: [state.appQueue.uris[index]] })
   });
+  const duration = state.appQueue.durations[state.appQueue.uris[index]] || 0;
+  if (duration) scheduleAppQueueAdvance(duration + 900);
   startPlaybackPolling();
 }
 
@@ -828,6 +877,7 @@ async function matchCurrentDay({ indicatorEl = null } = {}) {
     if (match) {
       t.spotifyUri = match.uri;
       t.spotifyName = match.name;
+      t.spotifyDurationMs = match.duration_ms;
       t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
       uris.push(match.uri);
     } else {
@@ -1038,9 +1088,10 @@ async function playCurrentDay(indicatorEl = null) {
       if (match) {
         t.spotifyUri = match.uri;
         t.spotifyName = match.name;
+        t.spotifyDurationMs = match.duration_ms;
         t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
         uris.push(match.uri);
-        appendToAppQueue(match.uri);
+        appendToAppQueue(match.uri, match.duration_ms);
 
         if (!started) {
           await playAppQueueIndex(0, deviceId);
