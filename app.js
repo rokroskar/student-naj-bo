@@ -1072,42 +1072,21 @@ async function playCurrentDay(indicatorEl = null) {
       $('playDay').textContent = '…';
     }
     rememberQueueSource();
+    state.appQueue = null;
+    clearAppQueueTimer();
     const deviceId = await getPlaybackDeviceId();
-    const uris = [];
-    let started = false;
-    startAppQueue(state.currentUrl, []);
+    const query = deviceId ? '?' + new URLSearchParams({ device_id: deviceId }) : '';
 
-    setPlaylistStatus(`Matching 0/${state.tracks.length}`);
-    for (let i = 0; i < state.tracks.length; i++) {
-      const t = state.tracks[i];
-      if (indicatorEl) indicatorEl.title = `Searching ${i + 1}/${state.tracks.length}: ${t.artist} — ${t.title}`;
-      setPlaylistStatus(started ? `Playing · matching ${i + 1}/${state.tracks.length}` : `Matching ${i + 1}/${state.tracks.length}`);
-      setPlaylistProgress(i, state.tracks.length);
-
-      const match = await findSpotifyTrack(t);
-      if (match) {
-        t.spotifyUri = match.uri;
-        t.spotifyName = match.name;
-        t.spotifyDurationMs = match.duration_ms;
-        t.spotifyArtists = match.artists?.map(a => a.name).join(', ');
-        uris.push(match.uri);
-        appendToAppQueue(match.uri, match.duration_ms);
-
-        if (!started) {
-          await playAppQueueIndex(0, deviceId);
-          started = true;
-          setPlaylistStatus(`Playing · matching ${i + 1}/${state.tracks.length}`);
-        }
-      } else {
-        t.spotifyMissing = true;
-        console.warn('No confident Spotify match:', t);
-      }
-      renderTracks();
-      await new Promise(r => setTimeout(r, 80));
-    }
-
-    setPlaylistProgress(state.tracks.length, state.tracks.length);
-    if (!uris.length) throw new Error('Spotify did not match any tracks.');
+    // Use Spotify's `uris` playback context for the whole day. This is the only
+    // reliable way to replace whatever was previously queued; the Web API does
+    // not provide a true "clear queue" operation. Background pre-matching keeps
+    // this fast in normal use.
+    const uris = await matchCurrentDay({ indicatorEl });
+    await spotifyApi('/me/player/play' + query, {
+      method: 'PUT',
+      body: JSON.stringify({ uris: uris.slice(0, 100) })
+    });
+    startPlaybackPolling();
     setPlaylistStatus(`Playing ${uris.length}/${state.tracks.length}`);
   } catch (err) {
     setPlaylistStatus(err.message, true);
