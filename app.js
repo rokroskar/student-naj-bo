@@ -3,6 +3,7 @@ const SPOTIFY_CACHE_KEY = 'rsSpotifyTrackCache:v1';
 const QUEUE_SOURCE_KEY = 'rsSpotifyQueueSource:v1';
 const LAST_TRACKLIST_KEY = 'rsLastTracklist:v1';
 const TRACKLIST_CACHE_KEY = 'rsTracklistCache:v1';
+const SPOTIFY_TOKEN_KEY = 'spotifyToken:v1';
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 // Optional for GitHub Pages: paste your Spotify app Client ID here.
 // This is not a secret when using PKCE; it is safe to ship in static frontend code.
@@ -10,7 +11,7 @@ const BUILT_IN_SPOTIFY_CLIENT_ID = '6470ecc276f1465cad092bd8ab210d46';
 const SPOTIFY_CLIENT_ID_OVERRIDE_KEY = 'spotifyClientIdOverride:v1';
 
 const $ = (id) => document.getElementById(id);
-const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false, appQueue: null, enforcingQueue: false, appQueueTimer: null };
+const state = { tracks: [], currentUrl: '', currentTitle: '', spotifyToken: null, playbackTimer: null, currentPlayback: null, webPlayer: null, webDeviceId: null, availableLists: [], preMatching: false, appQueue: null, enforcingQueue: false, appQueueTimer: null, refreshingToken: null };
 const spotifySdkReady = new Promise(resolve => {
   window.onSpotifyWebPlaybackSDKReady = resolve;
 });
@@ -34,10 +35,16 @@ $('openSpotify').addEventListener('click', () => matchTracksOnly($('openSpotify'
 handleSpotifyRedirect();
 restoreLastTracklist();
 loadLatestLists();
+setAppVersion();
 setInterval(() => loadLatestLists({ quiet: true }), REFRESH_INTERVAL_MS);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) loadLatestLists({ quiet: true });
 });
+
+function setAppVersion() {
+  const commit = window.APP_COMMIT || 'dev';
+  $('appVersion').textContent = `version ${String(commit).slice(0, 7)}`;
+}
 
 function setStatus(message, isError = false) {
   $('status').textContent = message || '';
@@ -351,6 +358,10 @@ function toggleSpotifyConnection() {
   if (state.spotifyToken) {
     state.spotifyToken = null;
     sessionStorage.removeItem('spotifyToken');
+    localStorage.removeItem(SPOTIFY_TOKEN_KEY);
+    state.webPlayer?.disconnect?.();
+    state.webPlayer = null;
+    state.webDeviceId = null;
     if (state.playbackTimer) clearInterval(state.playbackTimer);
     renderNowPlaying(null);
     setSpotifyConnected(false);
@@ -381,15 +392,81 @@ function getSpotifyClientId() {
   return localStorage.getItem(SPOTIFY_CLIENT_ID_OVERRIDE_KEY) || BUILT_IN_SPOTIFY_CLIENT_ID;
 }
 
+function readSpotifyToken() {
+  try {
+    return JSON.parse(localStorage.getItem(SPOTIFY_TOKEN_KEY) || sessionStorage.getItem('spotifyToken') || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function saveSpotifyToken(token) {
+  const previous = readSpotifyToken() || {};
+  const saved = {
+    ...previous,
+    ...token,
+    refresh_token: token.refresh_token || previous.refresh_token,
+    expiresAt: Date.now() + (token.expires_in || 3600) * 1000
+  };
+  localStorage.setItem(SPOTIFY_TOKEN_KEY, JSON.stringify(saved));
+  sessionStorage.setItem('spotifyToken', JSON.stringify(saved));
+  state.spotifyToken = saved.access_token;
+  return saved;
+}
+
+async function refreshSpotifyToken() {
+  const saved = readSpotifyToken();
+  if (!saved?.refresh_token) throw new Error('Reconnect Spotify. Refresh token is missing.');
+  const body = new URLSearchParams({
+    client_id: getSpotifyClientId(),
+    grant_type: 'refresh_token',
+    refresh_token: saved.refresh_token
+  });
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  const token = await safeJson(res);
+  if (!res.ok) throw new Error(token?.error_description || token?.error || 'Spotify token refresh failed');
+  return saveSpotifyToken(token);
+}
+
+async function ensureValidSpotifyToken() {
+  const saved = readSpotifyToken();
+  if (!saved?.access_token) throw new Error('Connect Spotify first.');
+  if (saved.expiresAt && saved.expiresAt > Date.now() + 120000) {
+    state.spotifyToken = saved.access_token;
+    return saved;
+  }
+  if (!state.refreshingToken) {
+    state.refreshingToken = refreshSpotifyToken().finally(() => { state.refreshingToken = null; });
+  }
+  return state.refreshingToken;
+}
+
+function establishSpotifySession() {
+  const saved = readSpotifyToken();
+  if (!saved?.access_token) return;
+  state.spotifyToken = saved.access_token;
+  setSpotifyConnected(true);
+  ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
+  startPlaybackPolling();
+  if (state.availableLists.length) preMatchSpotifyForLists(state.availableLists);
+}
+
 async function handleSpotifyRedirect() {
   const code = new URLSearchParams(location.search).get('code');
-  const saved = JSON.parse(sessionStorage.getItem('spotifyToken') || 'null');
-  if (saved && saved.expiresAt > Date.now() + 60000) {
-    state.spotifyToken = saved.access_token;
-    setSpotifyConnected(true);
-    ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
-    startPlaybackPolling();
-    if (state.availableLists.length) preMatchSpotifyForLists(state.availableLists);
+  const saved = readSpotifyToken();
+  if (saved && !code) {
+    try {
+      await ensureValidSpotifyToken();
+      establishSpotifySession();
+    } catch (err) {
+      console.warn('Could not refresh saved Spotify token', err);
+      sessionStorage.removeItem('spotifyToken');
+      setSpotifyConnected(false);
+    }
   }
   if (!code) return;
 
@@ -410,13 +487,8 @@ async function handleSpotifyRedirect() {
     });
     const token = await res.json();
     if (!res.ok) throw new Error(token.error_description || token.error || 'Spotify auth failed');
-    token.expiresAt = Date.now() + token.expires_in * 1000;
-    sessionStorage.setItem('spotifyToken', JSON.stringify(token));
-    state.spotifyToken = token.access_token;
-    setSpotifyConnected(true);
-    ensureWebPlayer().catch(err => console.warn('Spotify web player unavailable', err));
-    startPlaybackPolling();
-    if (state.availableLists.length) preMatchSpotifyForLists(state.availableLists);
+    saveSpotifyToken(token);
+    establishSpotifySession();
     history.replaceState({}, '', location.origin + location.pathname);
     const pending = JSON.parse(sessionStorage.getItem('pendingPlay') || 'null');
     sessionStorage.removeItem('pendingPlay');
@@ -441,7 +513,12 @@ async function ensureWebPlayer() {
     if (state.webPlayer) return resolve(state.webDeviceId);
     const player = new Spotify.Player({
       name: 'Študent naj bo!',
-      getOAuthToken: cb => cb(state.spotifyToken),
+      getOAuthToken: cb => ensureValidSpotifyToken()
+        .then(token => cb(token.access_token))
+        .catch(err => {
+          console.warn('Could not refresh token for Spotify player', err);
+          cb(state.spotifyToken);
+        }),
       volume: 0.8
     });
     state.webPlayer = player;
@@ -475,7 +552,7 @@ async function getPlaybackDeviceId() {
 }
 
 async function spotifyApi(path, options = {}) {
-  if (!state.spotifyToken) throw new Error('Connect Spotify first.');
+  await ensureValidSpotifyToken();
   const res = await fetch('https://api.spotify.com/v1' + path, {
     ...options,
     headers: {
@@ -484,7 +561,21 @@ async function spotifyApi(path, options = {}) {
       ...(options.headers || {})
     }
   });
-  const data = await safeJson(res);
+  let data = await safeJson(res);
+  if (res.status === 401) {
+    await refreshSpotifyToken();
+    const retry = await fetch('https://api.spotify.com/v1' + path, {
+      ...options,
+      headers: {
+        Authorization: 'Bearer ' + state.spotifyToken,
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+      }
+    });
+    data = await safeJson(retry);
+    if (!retry.ok) throw new Error(data?.error?.message || data?.message || `Spotify API failed (${retry.status})`);
+    return data;
+  }
   if (!res.ok) throw new Error(data?.error?.message || data?.message || `Spotify API failed (${res.status})`);
   return data;
 }
