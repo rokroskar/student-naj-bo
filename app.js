@@ -1,8 +1,8 @@
 const RS_INDEX = 'https://radiostudent.si/ostalo/glasbene-opreme';
-const SPOTIFY_CACHE_KEY = 'rsSpotifyTrackCache:v1';
+const SPOTIFY_CACHE_KEY = 'rsSpotifyTrackCache:v2';
 const QUEUE_SOURCE_KEY = 'rsSpotifyQueueSource:v1';
 const LAST_TRACKLIST_KEY = 'rsLastTracklist:v1';
-const TRACKLIST_CACHE_KEY = 'rsTracklistCache:v1';
+const TRACKLIST_CACHE_KEY = 'rsTracklistCache:v2';
 const SPOTIFY_TOKEN_KEY = 'spotifyToken:v1';
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 // Optional for GitHub Pages: paste your Spotify app Client ID here.
@@ -594,10 +594,14 @@ async function findSpotifyTrack(track) {
   // Spotify search will happily return a vaguely related track when the real one
   // is missing. Search several candidates, then verify artist/title similarity and
   // skip uncertain matches instead of playing wrong songs.
-  const queries = [
+  const searchArtist = spotifySearchArtist(track.artist);
+  const searchTitle = spotifySearchTitle(track.title);
+  const queries = uniqueStrings([
+    `artist:${quoteSpotifyQuery(searchArtist)} track:${quoteSpotifyQuery(searchTitle)}`,
     `artist:${quoteSpotifyQuery(track.artist)} track:${quoteSpotifyQuery(track.title)}`,
+    `${searchArtist} ${searchTitle}`,
     `${track.artist} ${track.title}`
-  ];
+  ]);
 
   const seen = new Set();
   const candidates = [];
@@ -619,7 +623,7 @@ async function findSpotifyTrack(track) {
 
   // Both sides must be plausible. This intentionally prefers missing/skipped
   // tracks over false positives.
-  if (best && best.score.title >= 0.72 && best.score.artist >= 0.55 && best.score.total >= 0.68) {
+  if (best && best.score.title >= 0.62 && best.score.artist >= 0.48 && best.score.total >= 0.60) {
     setCachedSpotifyMatch(track, best.item);
     return best.item;
   }
@@ -1060,10 +1064,25 @@ function getQueueSource() {
   catch { return null; }
 }
 
+function spotifySearchArtist(artist) {
+  return artist.replace(/^(.+),\s*the$/i, 'The $1').trim();
+}
+
+function spotifySearchTitle(title) {
+  return title
+    .replace(/\([^)]*(studijska verzija|demo|radio edit|remastered|live|v živo)[^)]*\)/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function spotifyMatchScore(wanted, item) {
   const wantedTitle = normaliseForMatch(wanted.title);
   const gotTitle = normaliseForMatch(item.name);
-  const wantedArtist = normaliseForMatch(wanted.artist);
+  const wantedArtist = normaliseForMatch(spotifySearchArtist(wanted.artist));
   const gotArtists = item.artists.map(a => normaliseForMatch(a.name)).join(' ');
 
   const title = Math.max(similarity(wantedTitle, gotTitle), containmentScore(wantedTitle, gotTitle));
