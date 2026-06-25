@@ -23,7 +23,13 @@ function toTrack(line) {
   let match = line.match(/^(.+?)\s[-–—]\s(.+)$/);
   let artist;
   let title;
-  if (match) {
+  const spacedParts = line.split(/\s[-–—]\s/).map(x => x.trim()).filter(Boolean);
+  if (spacedParts.length >= 3) {
+    // Some older lists use: artist - title - album - duration. The duration is
+    // already stripped, so keep artist/title and drop album/catalog metadata.
+    artist = spacedParts[0];
+    title = spacedParts[1];
+  } else if (match) {
     artist = match[1].trim();
     title = match[2].trim();
   } else if (line.includes('-')) {

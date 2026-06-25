@@ -113,6 +113,15 @@ test('extracts playlist titles from index markdown context and slug time range',
   assert.equal(parseIndexTitleFromMarkdownContext(after, url), '19. 5. 2026 – 7.00–11.00 / In a world without a future every promise is a lie');
 });
 
+test('parses older artist-title-album-duration rows by dropping album metadata', () => {
+  assert.deepEqual(toTrack(cleanTrackLine('1. O! KULT - ZA LJUDI (STUDIJSKA VERZIJA) - RAZREDNI BOJ JE EDINO GIBALO ZGODOVINE - 3:54')), {
+    artist: 'O! KULT', title: 'ZA LJUDI (STUDIJSKA VERZIJA)', query: 'O! KULT ZA LJUDI (STUDIJSKA VERZIJA)'
+  });
+  assert.deepEqual(toTrack(cleanTrackLine('37. N\'TOKO - PLEASE DIE - STUDIO SEŠN - 3:56')), {
+    artist: "N'TOKO", title: 'PLEASE DIE', query: "N'TOKO PLEASE DIE"
+  });
+});
+
 test('markdown parser ignores navigation and event links with hyphenated URLs', () => {
   const md = `# Seznam skladb
 * [Koncertni zapovednik](https://radiostudent.si/glasbeno-dogajanje)
